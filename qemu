@@ -1,0 +1,119 @@
+#!/bin/lua
+
+-- Create
+-- Delete
+local file
+local HOME = os.getenv("HOME")
+
+function file_exists(name)
+   local f=io.open(name,"r")
+   if f~=nil then io.close(f) return true else return false end
+end
+
+function dir_exists( path )
+   if type( path ) ~= 'string' then
+      error('input error')
+      return false
+   end
+   local response = os.execute( 'cd ' .. path )
+   if response == nil then
+      return false
+   end
+   return response
+end
+
+function write(o)
+   local file = io.open(HOME .. "/.luaqemu/qemu-machines.lua", "w")
+   file:write("return\n")
+   serialize(o, file)
+   file:close()
+end
+
+function serialize(o, file)
+   if type(o) == "number" then
+      file:write(o)
+   elseif type(o) == "string" then
+      file:write(string.format("%q", o))
+   elseif type(o) == "table" then
+      file:write("{\n")
+      for k,v in pairs(o) do
+	 file:write("  [", k, "] = ")
+	 serialize(v, file)
+	 file:write(",\n")
+      end
+      file:write("}\n")
+   else
+      error("cannot serialize a " .. type(o))
+   end
+end
+
+
+local function delete()
+   if arg[2] == nil then
+      print("You must specify the name of the machine to delete:")
+      print("Usage: qemu -d <machine>")
+      os.exit() os.exit()
+   end
+   local machines = file_exists(HOME .. "/.luaqemu/qemu-machines.lua") and dofile(HOME .. "/.luaqemu/qemu-machines.lua") or {}
+   for i, machine in ipairs(machines) do
+      if machine == arg[2] then
+	 table.remove(machines, i)
+	 write(machines) -- Guardamos las nuevas máquinas
+	 os.execute("rm '" .. HOME .. "/.luaqemu/Discos virtuales/".. arg[2] .. ".raw'")
+	 print("Deleted " .. arg[2] .. ".")
+	 return
+      end
+   end
+   print("There isn't any machine with name '" .. arg[2] .. "'.")
+end
+
+
+local function create()
+   if arg[2] == nil or arg[3] == nil then
+      print("You must specify the name of the machine to create following this pattern:")
+      print("qemu -c <machine> <hard-drive-size>")
+      return
+   end
+   local machines = file_exists(HOME .. "/.luaqemu/qemu-machines.lua") and dofile(HOME .. "/.luaqemu/qemu-machines.lua") or {}
+   for i, machine in ipairs(machines) do
+      if machine == arg[2] then
+	 print("There is already a machine with the name '" .. arg[2] .. "'.") 
+	 return
+      end
+   end
+   table.insert(machines, arg[2])
+   os.execute("qemu-img create -f raw '" .. HOME .. "/.luaqemu/" .. arg[2] .. ".raw' " .. arg[3])
+   print("Created " .. arg[2] .. ".")
+   write(machines) -- Guardamos las nuevas máquinas
+end
+
+local function launch()
+   if (arg[2] == nil or arg[3] == nil) or not (not arg[4] or (arg[4] == "--cdrom" and arg[5])) then
+      print("You must use this pattern:")
+      print("qemu -l <machine> <ram-size> [--cdrom <path-to-disk-image>]")
+      return
+   end
+   os.execute("qemu-system-x86_64 ".. (arg[4] and "-cdrom '" .. arg[5] .. "'" or "") .." -m " .. arg[3] .. " -cpu qemu64 -drive format=raw,file='" .. HOME .. "/.luaqemu/" .. arg[2] .. ".raw' -machine accel=kvm -soundhw hda -rtc base=localtime -k es-es -vga std")   
+end
+
+local function list()
+   local machines = file_exists(HOME .. "/.luaqemu/qemu-machines.lua") and dofile(HOME .. "/.luaqemu/qemu-machines.lua") or {}
+   for _,v in pairs(machines) do io.write(v, "\t") end
+   io.write("\n")
+end
+
+if not dir_exists(HOME .. "/.luaqemu") then
+   os.execute("mkdir $HOME/.luaqemu")
+end
+
+if arg[1] == "-d" then
+   delete()
+elseif arg[1] == "-c" then
+   create()
+elseif arg[1] == "-l" then
+   launch()
+elseif arg[1] == "--list" then
+   list()
+else
+   print("error, avaliable arguments are: -d, -c, -l, --list")
+end
